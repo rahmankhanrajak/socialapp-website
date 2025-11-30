@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-// import { auth } from "./firebase";          
-// import { signOut as firebaseSignOut } from "firebase/auth";
+import { auth, setupRecaptcha } from "./firebase";
+import { signInWithPhoneNumber, signOut as firebaseSignOut } from 'firebase/auth';
+import { resetRecaptcha } from "./firebase";
 
 import {
   Refresh as RefreshCw,
@@ -13,7 +14,6 @@ import {
   Logout as LogOut,
   ChevronLeft as ChevronLeft,
 } from '@mui/icons-material';
-
 
 import {
   ThemeProvider,
@@ -35,7 +35,6 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions,
   Pagination,
   Stack,
 } from '@mui/material';
@@ -55,7 +54,7 @@ function getGreeting() {
 let theme = createTheme({
   palette: {
     mode: 'light',
-    primary: { main: '#6750A4' }, 
+    primary: { main: '#6750A4' },
     secondary: { main: '#B583FF' },
     background: { default: '#F7F5FF', paper: '#FFF' },
     error: { main: '#B00020' },
@@ -80,7 +79,6 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [user, setUser] = useState(null);
   const [currentView, setCurrentView] = useState('menu');
-
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
   useEffect(() => {
@@ -119,12 +117,26 @@ export default function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+  try {
+    await firebaseSignOut(auth).catch(() => {});
+  } catch (e) {
+    console.warn('Firebase signOut failed:', e);
+  } finally {
+    resetRecaptcha();
+
+    if (window.confirmationResult) {
+      window.confirmationResult = null;
+    }
+
+    sessionStorage.removeItem('user');
+
     setIsLoggedIn(false);
     setUser(null);
     setCurrentView('menu');
-    sessionStorage.removeItem('user');
-  };
+  }
+};
+
 
   return (
     <ThemeProvider theme={theme}>
@@ -157,28 +169,25 @@ function AppContainer({ children }) {
 }
 
 function FacegramHeader({ onLogout, title = 'Facegram', user = null }) {
-  const firstName = user?.firstName || '';
   return (
     <Paper elevation={0} sx={{ p: 3, borderRadius: 3, mb: 3 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
         <Box>
           <Typography
-  variant="h5"
-  fontWeight={800}
-  sx={{
-    background: 'linear-gradient(90deg, #f58529, #dd2a7b, #833ab4, #5851db)',
-    WebkitBackgroundClip: 'text',
-    color: 'transparent',
-  }}
->
-  Facegram
-</Typography>
-
-
-         
+            variant="h5"
+            fontWeight={800}
+            sx={{
+              background: 'linear-gradient(90deg, #f58529, #dd2a7b, #833ab4, #5851db)',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent',
+            }}
+          >
+            {title}
+          </Typography>
         </Box>
         {onLogout && (
-          <Button variant="outlined" color="error" startIcon={<LogOut />} sx={{ borderRadius: 3 }}  onClick={onLogout}  >
+          <Button variant="outlined" color="error" startIcon={<LogOut />} sx={{ borderRadius: 3 }} onClick={onLogout}>
+            Signout
           </Button>
         )}
       </Box>
@@ -189,8 +198,8 @@ function FacegramHeader({ onLogout, title = 'Facegram', user = null }) {
 function LoginScreen({ onLogin, isOnline }) {
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState(null);
   const [otpSent, setOtpSent] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState('');
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -200,98 +209,92 @@ function LoginScreen({ onLogin, isOnline }) {
   const [showProfileForm, setShowProfileForm] = useState(false);
 
   const validateMobile = (number) => /^[6-9]\d{9}$/.test(number);
+async function handleSendOtp() {
+  try {
+    const phone = "+91" + mobileNumber;
 
-  const handleSendOtp = () => {
-    if (!isOnline) {
-      alert('You are offline — cannot send OTP. Please connect to the internet.');
-      return;
-    }
-    setErrors({});
-    if (!mobileNumber) {
-      setErrors({ mobile: 'Mobile number is required' });
-      return;
-    }
-    if (!validateMobile(mobileNumber)) {
-      setErrors({ mobile: 'Please enter a valid 10-digit mobile number' });
-      return;
-    }
-    const mockOtp = Math.floor(100000 + Math.random() * 900000).toString();
-    setGeneratedOtp(mockOtp);
+    const recaptcha = setupRecaptcha();
+
+    const confirmation = await signInWithPhoneNumber(auth, phone, recaptcha);
+
+    window.confirmationResult = confirmation;
+
+    alert("OTP sent successfully!");
     setOtpSent(true);
-    alert(`OTP sent successfully! Your OTP is: ${mockOtp}`);
+  } catch (error) {
+    console.error("Failed to send OTP", error);
+    alert("Retry");
+    // alert(error.message);
+  }
+}
+  
+const handleVerifyOtp = async () => {
+  setErrors({});
+  setIsSubmitting(true);
+
+  try {
+    await window.confirmationResult.confirm(otp);
+
+    setShowProfileForm(true);
+
+  } catch (e) {
+    setErrors({ otp: "Invalid OTP. Please try again." });
+  } finally {
+    setIsSubmitting(false);
+  }
+};
+
+const handleCompleteSignup = () => {
+  setErrors({});
+
+  if (!firstName) {
+    setErrors({ profile: "First name is required" });
+    return;
+  }
+
+  const displayName = `${firstName}${lastName ? " " + lastName : ""}`.trim();
+
+  const userObj = {
+    firstName,
+    lastName,
+    city,
+    displayName,
+    phone: mobileNumber,
   };
 
-  const handleVerifyOtp = () => {
-    setErrors({});
-    setIsSubmitting(true);
-    setTimeout(() => {
-      if (!otp) {
-        setErrors({ otp: 'OTP is required' });
-        setIsSubmitting(false);
-        return;
-      }
-      if (otp.length !== 6) {
-        setErrors({ otp: 'OTP must be 6 digits' });
-        setIsSubmitting(false);
-        return;
-      }
-      if (otp !== generatedOtp) {
-        setErrors({ otp: 'Invalid OTP. Please try again.' });
-        setIsSubmitting(false);
-        return;
-      }
-      setShowProfileForm(true);
-      setIsSubmitting(false);
-    }, 400);
+  setShowProfileForm(false);
+
+  onLogin(userObj);
+};
+
+const handleSkip = () => {
+  const userObj = {
+    firstName: "",
+    lastName: "",
+    city: "",
+    displayName: "",
+    phone: mobileNumber,
   };
 
-  const handleCompleteSignup = () => {
-    setErrors({});
-    if (!firstName) {
-      setErrors({ profile: 'First name is required' });
-      return;
-    }
-    const displayName = `${firstName}${lastName ? ' ' + lastName : ''}`.trim();
-    const userObj = { firstName, lastName, city, displayName, phone: mobileNumber };
-    onLogin(userObj);
-  };
+  setShowProfileForm(false);
+  onLogin(userObj); 
+};
+
 
   const greeting = getGreeting();
 
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', p: 3,background: 'linear-gradient(135deg, #f58529 0%, #dd2a7b 40%, #833ab4 70%, #515bd4 100%)'
- }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', p: 3, background: 'linear-gradient(135deg, #f58529 0%, #dd2a7b 40%, #833ab4 70%, #515bd4 100%)' }}>
       <Paper sx={{ width: '100%', maxWidth: 480, p: 4, borderRadius: 3 }}>
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
-    
-          
-          {!isOnline && (
-            <Box sx={{ mt: 2 }}>
-              <Paper sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, px: 2, py: 0.5, bgcolor: 'warning.light' }}>
-                <AlertCircle />
-                <Typography variant="body2" color="warning.dark">You are offline — limited functionality</Typography>
-              </Paper>
-            </Box>
-          )}
-        </Box>
+     
+        <div id="recaptcha-container" />
 
         {!showProfileForm ? (
           <Stack spacing={2}>
-            <Typography variant="h4" fontWeight={800}>
-            Signup with 
+          <Typography variant="h4" fontWeight={800}>Signup with</Typography>
+          <Typography variant="h5" fontWeight={800} sx={{ background: 'linear-gradient(90deg, #f58529, #dd2a7b, #833ab4, #5851db)', WebkitBackgroundClip: 'text', color: 'transparent' }}>
+            Facegram
           </Typography>
-           <Typography
-  variant="h5"
-  fontWeight={800}
-  sx={{
-    background: 'linear-gradient(90deg, #f58529, #dd2a7b, #833ab4, #5851db)',
-    WebkitBackgroundClip: 'text',
-    color: 'transparent',
-  }}
->
-  Facegram
-</Typography>
-
             <TextField
               label="Mobile Number"
               placeholder="Enter 10-digit mobile number"
@@ -303,8 +306,8 @@ function LoginScreen({ onLogin, isOnline }) {
               fullWidth
             />
 
-            <Button variant="contained" disabled={!mobileNumber || otpSent} onClick={handleSendOtp} sx={{ py: 1.5 }}>
-              {otpSent ? 'OTP Sent ✓' : 'Send OTP'}
+            <Button variant="contained" disabled={!mobileNumber || otpSent || isSubmitting} onClick={handleSendOtp} sx={{ py: 1.5 }}>
+              {isSubmitting ? 'Sending...' : (otpSent ? 'OTP Sent ✓' : 'Send OTP')}
             </Button>
 
             <TextField
@@ -325,29 +328,37 @@ function LoginScreen({ onLogin, isOnline }) {
 
             {otpSent && (
               <Box sx={{ textAlign: 'center', mt: 1 }}>
-                <Button variant="text" onClick={handleSendOtp} sx={{ textTransform: 'none' }}>Resend OTP</Button>
+                <Button variant="text" onClick={() => { setOtp(''); setOtpSent(false); clearRecaptcha(); }} sx={{ textTransform: 'none' }}>Resend OTP</Button>
               </Box>
             )}
           </Stack>
         ) : (
           <Stack spacing={2}>
             {errors.profile && <Typography color="error">{errors.profile}</Typography>}
-
             <TextField label="First name" value={firstName} onChange={(e) => setFirstName(e.target.value)} fullWidth />
             <TextField label="Last name" value={lastName} onChange={(e) => setLastName(e.target.value)} fullWidth />
             <TextField label="City" value={city} onChange={(e) => setCity(e.target.value)} fullWidth />
 
             <Box sx={{ display: 'flex', gap: 2 }}>
-              <Button fullWidth variant="contained" onClick={handleCompleteSignup}>
-                Complete & Continue
-              </Button>
-              <Button fullWidth variant="outlined" onClick={() => setShowProfileForm(false)}>
-                Back
-              </Button>
+              <Box sx={{ display: "flex", gap: 2, flexDirection: "row" }}>
+  <Button fullWidth variant="contained" onClick={handleCompleteSignup}>
+    Complete & Continue
+  </Button>
+
+  <Button fullWidth variant="outlined" onClick={handleSkip}>
+    Skip
+  </Button>
+
+  <Button fullWidth variant="text" onClick={() => setShowProfileForm(false)}>
+    Back
+  </Button>
+</Box>
             </Box>
           </Stack>
         )}
       </Paper>
+      <div id="recaptcha-container"></div>
+
     </Box>
   );
 }
@@ -363,7 +374,7 @@ function MenuScreen({ user, onNavigate, onLogout, isOnline }) {
 
   const safeNavigate = (id) => {
     if (!isOnline) {
-      alert('You are offline — cannot navigate to another page. Please connect to the internet.');
+      alert('You are offline ');
       return;
     }
     onNavigate(id);
@@ -372,44 +383,22 @@ function MenuScreen({ user, onNavigate, onLogout, isOnline }) {
   return (
     <AppContainer>
       <FacegramHeader onLogout={onLogout} user={user} />
-<Paper sx={{ p: 1.5, borderRadius: 2, mb: 2 }}>
-  <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
-    
-   
 
-    <Box sx={{ flex: 1 }}>
-      <Typography
-        variant="subtitle1"
-        fontWeight={700}
-        sx={{ lineHeight: 1.1 }}
-      >
-        {greeting}, {user?.firstName || user?.displayName} 👋
-      </Typography>
-    </Box>
+      <Paper sx={{ p: 1.5, borderRadius: 2, mb: 2 }}>
+        <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ lineHeight: 1.1 }}>
+              {greeting}, {user?.firstName || user?.displayName} 👋
+            </Typography>
+          </Box>
 
-    {!isOnline && (
-      <Paper
-        sx={{
-          px: 1.5,
-          py: 0.2,
-          bgcolor: 'warning.light',
-          borderRadius: 1.5,
-        }}
-      >
-        <Typography
-          variant="caption"
-          color="warning.dark"
-          fontWeight={600}
-        >
-          Offline
-        </Typography>
+          {!isOnline && (
+            <Paper sx={{ px: 1.5, py: 0.2, bgcolor: 'warning.light', borderRadius: 1.5 }}>
+              <Typography variant="caption" color="warning.dark" fontWeight={600}>Offline</Typography>
+            </Paper>
+          )}
+        </Box>
       </Paper>
-    )}
-
-  </Box>
-</Paper>
-
-      
 
       <Grid container spacing={2}>
         {menuItems.map((item) => {
@@ -429,7 +418,7 @@ function MenuScreen({ user, onNavigate, onLogout, isOnline }) {
               >
                 <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                   <Box sx={{ bgcolor: item.color, width: 56, height: 56, borderRadius: 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Icon color="#fff" />
+                    <Icon style={{ color: '#fff' }} />
                   </Box>
                   <Box>
                     <Typography variant="h6" fontWeight={700}>{item.title}</Typography>
@@ -474,7 +463,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
   };
 
   const fetchPosts = async () => {
-    try { 
+    try {
       setLoading(true);
       setError(null);
 
@@ -508,7 +497,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
 
   const handleRefresh = () => {
     if (!isOnline) {
-      alert('You are offline — cannot refresh. Showing cached data if available.');
+      alert('You are offline ');
       return;
     }
     fetchPosts();
@@ -521,7 +510,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
 
   const handleNextPage = () => {
     if (!isOnline) {
-      alert('You are offline — pagination is disabled while offline.');
+      alert('You are offline ');
       return;
     }
     if (page < totalPages) setPage((p) => p + 1);
@@ -530,7 +519,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
 
   const handlePrevPage = () => {
     if (!isOnline) {
-      alert('You are offline — pagination is disabled while offline.');
+      alert('You are offline');
       return;
     }
     if (page > 1) setPage((p) => p - 1);
@@ -551,7 +540,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
     return (
       <Box sx={{ minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
         <Paper sx={{ p: 4, borderRadius: 3, maxWidth: 520, textAlign: 'center' }}>
-          <AlertCircle color="#B00020" size={36} />
+          <AlertCircle color="#B00020" fontSize="large" />
           <Typography variant="h6" sx={{ mt: 2, fontWeight: 700 }}>Something went wrong</Typography>
           <Typography sx={{ mt: 1, color: 'text.secondary' }}>{error}</Typography>
           <Box sx={{ mt: 3 }}>
@@ -571,13 +560,12 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
             <IconButton
               onClick={() => {
                 if (!isOnline) {
-                  alert('You are offline —.');
+                  alert('You are offline ');
                   return;
                 }
                 onBack();
               }}
               disabled={!isOnline}
-              sx={{ bgcolor: !isOnline ? 'transparent' : 'transparent' }}
             >
               <ChevronLeft />
             </IconButton>
@@ -593,7 +581,7 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
         <Paper sx={{ p: 1.5, mb: 2, bgcolor: 'warning.light' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             <AlertCircle />
-            <Typography fontWeight={700}>You are offline.</Typography>
+            <Typography fontWeight={700}>You are offline</Typography>
           </Box>
         </Paper>
       )}
@@ -604,22 +592,22 @@ function PostsScreen({ onBack, onLogout, user, isOnline }) {
             <Card variant="outlined" sx={{ borderRadius: 3 }}>
               <CardContent sx={{ display: 'flex', gap: 2 }}>
                 <Box
-                    sx={{
-                      width: 56,
-                      height: 56,
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #f58529, #dd2a7b, #833ab4, #5851db)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#fff',
-                      fontWeight: 700,
-                      flexShrink: 0,
-                      fontSize: '0.75rem',
-                    }}
-                    >
-                      U{post.userId}
-                    </Box>
+                  sx={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: '50%',
+                    background: 'linear-gradient(135deg, #f58529, #dd2a7b, #833ab4, #5851db)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontWeight: 700,
+                    flexShrink: 0,
+                    fontSize: '0.75rem',
+                  }}
+                >
+                  U{post.userId}
+                </Box>
 
                 <Box>
                   <Typography variant="h6" fontWeight={800} sx={{ textTransform: 'capitalize' }}>{post.title}</Typography>
@@ -671,7 +659,7 @@ function ProfileScreen({ user, setUser, onBack, onLogout, isOnline }) {
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <IconButton onClick={() => { if (!isOnline) { alert('You are offline — cannot navigate back while offline.'); return; } onBack(); }} disabled={!isOnline}>
+          <IconButton onClick={() => { if (!isOnline) { alert('You are offline'); return; } onBack(); }} disabled={!isOnline}>
             <ChevronLeft />
           </IconButton>
           <Typography variant="h5" fontWeight={800}>Profile</Typography>
@@ -681,7 +669,7 @@ function ProfileScreen({ user, setUser, onBack, onLogout, isOnline }) {
       <Paper sx={{ p: 4, borderRadius: 3 }}>
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <Avatar sx={{ width: 112, height: 112, bgcolor: 'primary.main', mx: 'auto' }}>
-            <User color="#fff" />
+            <User style={{ color: '#fff' }} />
           </Avatar>
           <Typography variant="h4" fontWeight={800} sx={{ mt: 2 }}>{user?.displayName}</Typography>
           <Typography color="text.secondary">{user?.phone || ''}</Typography>
@@ -733,7 +721,7 @@ function SettingsScreen({ user, onBack, onLogout, isOnline }) {
 
       <Paper sx={{ p: 2, mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-          <IconButton onClick={() => { if (!isOnline) { alert('You are offline — cannot navigate back while offline.'); return; } onBack(); }} disabled={!isOnline}>
+          <IconButton onClick={() => { if (!isOnline) { alert('You are offline '); return; } onBack(); }} disabled={!isOnline}>
             <ChevronLeft />
           </IconButton>
           <Typography variant="h5" fontWeight={800}>Settings</Typography>
@@ -750,7 +738,7 @@ function SettingsScreen({ user, onBack, onLogout, isOnline }) {
             </Stack>
           </Box>
 
-
+        
           
         </Stack>
       </Paper>
