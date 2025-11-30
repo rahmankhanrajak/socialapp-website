@@ -219,7 +219,7 @@ async function handleSendOtp() {
 
     window.confirmationResult = confirmation;
 
-    alert("OTP sent successfully!");
+    alert("OTP sent successfully!. Firebase auth enabled");
     setOtpSent(true);
   } catch (error) {
     console.error("Failed to send OTP", error);
@@ -297,7 +297,7 @@ const handleSkip = () => {
           </Typography>
             <TextField
               label="Mobile Number"
-              placeholder="Enter 10-digit mobile number"
+              placeholder="Enter 9876543210"
               value={mobileNumber}
               onChange={(e) => setMobileNumber(e.target.value.replace(/\D/g, '').slice(0, 10))}
               InputProps={{ startAdornment: (<InputAdornment position="start"><Phone /></InputAdornment>) }}
@@ -312,7 +312,7 @@ const handleSkip = () => {
 
             <TextField
               label="Enter OTP"
-              placeholder="6-digit OTP"
+              placeholder="Enter 12345678"
               value={otp}
               onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
               inputProps={{ maxLength: 6, style: { letterSpacing: 6, textAlign: 'center', fontWeight: 700, fontSize: 18 } }}

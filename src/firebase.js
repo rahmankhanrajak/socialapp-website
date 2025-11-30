@@ -5,15 +5,13 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  apiKey: "AIzaSyA5_p08FSvLEJlDlSUw-N2T5oz10LXHNqI",
+  authDomain: "socialapp-auth-f8c45.firebaseapp.com",
+  projectId: "socialapp-auth-f8c45",
+  storageBucket: "socialapp-auth-f8c45.firebasestorage.app",
+  messagingSenderId: "937774219772",
+  appId: "1:937774219772:web:edc0beb0ae7047e0dff279"
 };
-
-
 
 const app = initializeApp(firebaseConfig);
 
